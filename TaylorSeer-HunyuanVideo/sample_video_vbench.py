@@ -19,6 +19,7 @@ from hyvideo.inference import HunyuanVideoSampler
 def suppress_output():
     """
     Temporarily suppress standard output, standard error, and loguru output.
+    Exceptions are re-raised so errors are not silently swallowed.
     """
     old_stdout = sys.stdout
     old_stderr = sys.stderr
@@ -29,6 +30,12 @@ def suppress_output():
             # Disable loguru output
             logger.disable("")
             yield
+    except Exception:
+        # Restore outputs before re-raising so the error is visible
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        logger.enable("")
+        raise
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr

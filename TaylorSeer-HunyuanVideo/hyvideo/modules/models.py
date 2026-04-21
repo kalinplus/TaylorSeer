@@ -17,7 +17,7 @@ from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
 from .cache_functions import cal_type, force_init, cache_cutfresh, update_cache
-from .taylor_utils import derivative_approximation, taylor_formula, taylor_cache_init
+from .taylor_utils import update_cache_or_approximate, taylor_formula, taylor_cache_init
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -236,15 +236,12 @@ class MMDoubleStreamBlock(nn.Module):
 
             # Calculate the img bloks.
             current['module'] = 'img_attn'
-            taylor_cache_init(cache_dic, current)
 
             img_attn_out = self.img_attn_proj(img_attn)
             img = img + apply_gate(img_attn_out, gate=img_mod1_gate)
-            derivative_approximation(cache_dic, current, img_attn_out)
-            #img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
+            update_cache_or_approximate(cache_dic, current, img_attn_out)
 
             current['module'] = 'img_mlp'
-            taylor_cache_init(cache_dic, current)
 
             img_mlp_out = self.img_mlp(
                 modulate(
@@ -252,28 +249,16 @@ class MMDoubleStreamBlock(nn.Module):
                 )
             )
             img = img + apply_gate(img_mlp_out, gate=img_mod2_gate)
-            derivative_approximation(cache_dic, current, img_mlp_out)
-
-            #img = img + apply_gate(
-            #    self.img_mlp(
-            #        modulate(
-            #            self.img_norm2(img), shift=img_mod2_shift, scale=img_mod2_scale
-            #        )
-            #    ),
-            #    gate=img_mod2_gate,
-            #)
+            update_cache_or_approximate(cache_dic, current, img_mlp_out)
 
             # Calculate the txt bloks.
             current['module'] = 'txt_attn'
-            taylor_cache_init(cache_dic, current)
 
             txt_attn_out = self.txt_attn_proj(txt_attn)
             txt = txt + apply_gate(txt_attn_out, gate=txt_mod1_gate)
-            derivative_approximation(cache_dic, current, txt_attn_out)
-            #txt = txt + apply_gate(self.txt_attn_proj(txt_attn), gate=txt_mod1_gate)
+            update_cache_or_approximate(cache_dic, current, txt_attn_out)
 
             current['module'] = 'txt_mlp'
-            taylor_cache_init(cache_dic, current)
 
             txt_mlp_out = self.txt_mlp(
                 modulate(
@@ -281,43 +266,30 @@ class MMDoubleStreamBlock(nn.Module):
                 )
             )
             txt = txt + apply_gate(txt_mlp_out, gate=txt_mod2_gate)
-            derivative_approximation(cache_dic, current, txt_mlp_out)
-
-            #txt = txt + apply_gate(
-            #    self.txt_mlp(
-            #        modulate(
-            #            self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale
-            #        )
-            #    ),
-            #    gate=txt_mod2_gate,
-            #)
+            update_cache_or_approximate(cache_dic, current, txt_mlp_out)
 
         elif current['type'] == 'taylor_cache':
-            
-            current['module'] = 'attn'
-            # Just a symbolic name
 
-            # Calculate the img bloks.
             current['module'] = 'img_attn'
 
-            img = img + apply_gate(taylor_formula(cache_dic, current), gate=img_mod1_gate)
+            img = img + apply_gate(update_cache_or_approximate(cache_dic, current), gate=img_mod1_gate)
 
             current['module'] = 'img_mlp'
 
             img = img + apply_gate(
-                taylor_formula(cache_dic, current),
+                update_cache_or_approximate(cache_dic, current),
                 gate=img_mod2_gate,
             )
-    
+
             # Calculate the txt bloks.
             current['module'] = 'txt_attn'
 
-            txt = txt + apply_gate(taylor_formula(cache_dic, current), gate=txt_mod1_gate)
+            txt = txt + apply_gate(update_cache_or_approximate(cache_dic, current), gate=txt_mod1_gate)
 
             current['module'] = 'txt_mlp'
 
             txt = txt + apply_gate(
-                taylor_formula(cache_dic, current),
+                update_cache_or_approximate(cache_dic, current),
                 gate=txt_mod2_gate,
             )
 
@@ -489,7 +461,6 @@ class MMSingleStreamBlock(nn.Module):
             current['module'] = 'mlp'
 
             current['module'] = 'attn'
-            taylor_cache_init(cache_dic, current)
 
             q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
 
@@ -539,19 +510,18 @@ class MMSingleStreamBlock(nn.Module):
                     cu_seqlens_kv=cu_seqlens_kv
                 )
             # attention computation end
-            derivative_approximation(cache_dic, current, attn)
+            update_cache_or_approximate(cache_dic, current, attn)
 
             current['module'] = 'total'
-            taylor_cache_init(cache_dic, current)
             # Compute activation in mlp stream, cat again and run second linear layer.
             output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-            derivative_approximation(cache_dic, current, output)
-        
+            update_cache_or_approximate(cache_dic, current, output)
+
         elif current['type'] == 'taylor_cache':
-            
+
             current['module'] = 'total'
 
-            output = taylor_formula(cache_dic, current)
+            output = update_cache_or_approximate(cache_dic, current)
 
         elif current['type'] == 'ToCa':
 

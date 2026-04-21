@@ -1,4 +1,5 @@
-# !/bin/bash
+#!/bin/bash
+# 并行生成 VBench 评估视频
 
 CKPT=$1
 NUM_FRAMES=$2
