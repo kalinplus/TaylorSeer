@@ -50,6 +50,8 @@ download() {
     echo "  URL: $url"
     echo "  Dest: $dest"
 
+    mkdir -p "$(dirname "$dest")"
+
     local retries=3
     local delay=5
     for i in $(seq 1 $retries); do
@@ -66,7 +68,9 @@ download() {
     # Clean up failed download
     rm -f "$dest.tmp"
     echo "[FAILED] $desc — all retries exhausted"
-    return 1
+    # NOTE: return 0 (not 1) so set -e does not abort before the final self-check;
+    # missing files are still reported by the OK/MISSING check at the end.
+    return 0
 }
 
 # ── Helper: clone a git repo, skip if directory exists ──────────────────────
@@ -81,6 +85,7 @@ clone_repo() {
     fi
 
     echo "[CLONING] $desc"
+    mkdir -p "$(dirname "$dest")"
     local retries=3
     for i in $(seq 1 $retries); do
         if git clone --depth 1 "$url" "$dest" 2>&1; then
@@ -94,7 +99,8 @@ clone_repo() {
     done
 
     echo "[FAILED] $desc — all retries exhausted"
-    return 1
+    # NOTE: return 0 (not 1) so set -e does not abort before the final self-check.
+    return 0
 }
 
 echo ""
@@ -155,9 +161,9 @@ download \
 echo ""
 echo "──── 8/11 Aesthetic predictor (aesthetic_quality) ─────────────────────"
 download \
-    "${HF_MIRROR}/LAION-AI/aesthetic-predictor/resolve/main/sa_0_4_vit_l_14_linear.pth" \
+    "${GITHUB_MIRROR}/LAION-AI/aesthetic-predictor/raw/main/sa_0_4_vit_l_14_linear.pth" \
     "$CACHE_DIR/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth" \
-    "LAION aesthetic predictor (hf-mirror)" \
+    "LAION aesthetic predictor (github mirror)" \
     "allow_small"
 
 echo ""

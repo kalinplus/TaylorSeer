@@ -78,7 +78,8 @@ def cache_init(num_steps, model_kwargs=None):
     cache_dic['smoothing_method'] = smoothing_method
     cache_dic['smoothing_alpha'] = smoothing_alpha
 
-    mode = 'Taylor'
+    mode = os.environ.get('TAYLOR_MODE', 'Taylor')
+    print(f"[TaylorSeer] mode={mode!r}")
     if mode == 'original':
         cache_dic['cache_type'] = 'random'
         cache_dic['cache_index'] = cache_index
