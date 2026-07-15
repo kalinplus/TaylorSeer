@@ -13,10 +13,15 @@ def cache_init(num_steps, model_kwargs=None):
     use_hybrid_smoothing = os.environ.get('TAYLOR_USE_HYBRID_SMOOTHING', 'False').lower() in ('true', '1', 'yes')
     smoothing_method = os.environ.get('TAYLOR_SMOOTHING_METHOD', 'exponential')
     smoothing_alpha = float(os.environ.get('TAYLOR_SMOOTHING_ALPHA', '0.8'))
+    # Keep the smoothing history slot (cache[-2]) on CPU to save GPU memory; it is brought
+    # back to GPU transiently only inside derivative_approximation_*_smoothing.
+    # Numerically identical to keeping it on GPU — set to False to A/B verify bit-identity.
+    offload_smoothing_history = os.environ.get('TAYLOR_SMOOTHING_OFFLOAD_HISTORY', 'True').lower() in ('true', '1', 'yes')
 
     print(f"[TaylorSeer] first_enhance={first_enhance}, max_order={max_order}, fresh_threshold={fresh_threshold}")
     print(f"[TaylorSeer] use_smoothing={use_smoothing}, use_hybrid_smoothing={use_hybrid_smoothing}, "
           f"smoothing_method={smoothing_method!r}, smoothing_alpha={smoothing_alpha}")
+    print(f"[TaylorSeer] offload_smoothing_history={offload_smoothing_history}")
 
     cache_dic = {}
     cache = {}
@@ -77,6 +82,7 @@ def cache_init(num_steps, model_kwargs=None):
     cache_dic['use_hybrid_smoothing'] = use_hybrid_smoothing
     cache_dic['smoothing_method'] = smoothing_method
     cache_dic['smoothing_alpha'] = smoothing_alpha
+    cache_dic['offload_smoothing_history'] = offload_smoothing_history
 
     mode = os.environ.get('TAYLOR_MODE', 'Taylor')
     print(f"[TaylorSeer] mode={mode!r}")

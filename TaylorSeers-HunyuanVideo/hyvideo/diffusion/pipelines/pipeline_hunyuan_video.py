@@ -18,6 +18,8 @@
 # ==============================================================================
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+import os
+
 import torch
 import torch.distributed as dist
 import numpy as np
@@ -966,11 +968,23 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
+            # [MEM-DBG] baseline after text encoding, before denoising
+            try:
+                torch.cuda.reset_peak_memory_stats()
+                os.write(2, f"[MEM] denoise-start: alloc={torch.cuda.memory_allocated()/1024**3:.2f}GiB reserved={torch.cuda.memory_reserved()/1024**3:.2f}GiB\n".encode())
+            except Exception:
+                pass
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
 
                 current['step'] = i
+
+                # [MEM-DBG] per-step memory before the transformer forward
+                try:
+                    os.write(2, f"[MEM] step {i} pre-fwd: alloc={torch.cuda.memory_allocated()/1024**3:.2f}GiB reserved={torch.cuda.memory_reserved()/1024**3:.2f}GiB\n".encode())
+                except Exception:
+                    pass
 
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (
@@ -1035,6 +1049,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                             "x"
                         ]
 
+                # [MEM-DBG] per-step memory after the transformer forward (peak = high-water mark)
+                try:
+                    os.write(2, f"[MEM] step {i} post-fwd: alloc={torch.cuda.memory_allocated()/1024**3:.2f}GiB reserved={torch.cuda.memory_reserved()/1024**3:.2f}GiB peak={torch.cuda.max_memory_allocated()/1024**3:.2f}GiB\n".encode())
+                except Exception:
+                    pass
+
                 # perform guidance
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -1076,6 +1096,17 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
+
+        # [MEM-FIX] The Taylor feature cache (tens of GiB) is only needed inside the
+        # denoising loop above. Drop it before VAE decoding — otherwise VAE decode OOMs
+        # on top of the still-resident cache. cache_dic itself is kept (it's referenced by
+        # the FLOPs report below and only holds scalar flags after this).
+        cache_dic['cache'] = None
+        torch.cuda.empty_cache()
+        try:
+            os.write(2, f"[MEM] after cache freed: alloc={torch.cuda.memory_allocated()/1024**3:.2f}GiB reserved={torch.cuda.memory_reserved()/1024**3:.2f}GiB\n".encode())
+        except Exception:
+            pass
 
         if not output_type == "latent":
             expand_temporal_dim = False

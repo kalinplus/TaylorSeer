@@ -71,7 +71,19 @@ def shift_cache_history(cache_dic: Dict, current: Dict):
         cache[-2][s][l][m] = {}
         return
 
-    cache[-2][s][l][m] = cache[-1][s][l][m]
+    if cache_dic.get("offload_smoothing_history", True):
+        # Keep the history slot on CPU to save GPU memory; it is brought back to GPU
+        # transiently inside derivative_approximation_*_smoothing. Numerically identical
+        # to keeping it on GPU (same values, just a different storage location).
+        prev = cache[-1][s][l][m]
+        if isinstance(prev, dict):
+            cache[-2][s][l][m] = {
+                k: (v.cpu() if torch.is_tensor(v) else v) for k, v in prev.items()
+            }
+        else:
+            cache[-2][s][l][m] = prev
+    else:
+        cache[-2][s][l][m] = cache[-1][s][l][m]
 
 
 def exponential_smoothing(features: list, alpha: float) -> list:
@@ -109,6 +121,9 @@ def derivative_approximation_with_smoothing(cache_dic: Dict, current: Dict, feat
     # Collect historical features: [F_{-2}, F_{-1}, F_0]
     f_prev2 = cache_dic["cache"][-2][s][l][m].get(0, None)
     f_prev1 = cache_dic["cache"][-1][s][l][m].get(0, None)
+    # History may be kept on CPU (offload_smoothing_history); move to GPU only for this computation.
+    if f_prev2 is not None:
+        f_prev2 = f_prev2.to(feature.device)
 
     if f_prev2 is not None and f_prev1 is not None and f_prev2.shape == f_prev1.shape == feature.shape:
         raw_features = [f_prev2, f_prev1, feature]
@@ -164,6 +179,8 @@ def derivative_approximation_hybrid_smoothing(cache_dic: Dict, current: Dict, fe
     # 2nd+ order: smoothed features
     if cache_dic['max_order'] >= 2:
         f_prev2 = cache_dic["cache"][-2][s][l][m].get(0, None)
+        if f_prev2 is not None:
+            f_prev2 = f_prev2.to(feature.device)  # history may be on CPU
         if f_prev2 is not None and f_prev2.shape == feature.shape:
             raw_features = [f_prev2, f_prev1, feature]
             smooth_fn = exponential_smoothing if method == 'exponential' else moving_average_smoothing

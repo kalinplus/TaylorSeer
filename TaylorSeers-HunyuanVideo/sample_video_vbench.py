@@ -11,6 +11,8 @@ from pathlib import Path
 from loguru import logger
 from datetime import datetime
 
+import torch
+
 from hyvideo.utils.file_utils import save_videos_grid
 from hyvideo.config import parse_args
 from hyvideo.inference import HunyuanVideoSampler
@@ -76,6 +78,12 @@ def main():
     hunyuan_video_sampler = HunyuanVideoSampler.from_pretrained(models_root_path, args=args)
     # Update sampler internal parameters
     args = hunyuan_video_sampler.args
+
+    # [MEM-DBG] GPU memory footprint right after model load (with cpu offload this should be ~0)
+    try:
+        print(f"[MEM] after model load: alloc={torch.cuda.memory_allocated()/1024**3:.2f}GiB reserved={torch.cuda.memory_reserved()/1024**3:.2f}GiB", flush=True)
+    except Exception:
+        pass
 
     total_prompts = len(selected_prompts)
     for idx, item in enumerate(selected_prompts):

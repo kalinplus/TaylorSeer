@@ -92,6 +92,10 @@ ckpts/
 - `--video-size H W` — Resolution (supported: 540p and 720p presets, various aspect ratios)
 - `--video-length` — 65 or 129 frames
 - `--infer-steps` — Denoising steps (default 50)
+
+### `first_enhance` configuration rule (important)
+- When the model being run has its test step count (`--infer-steps`) set to **50**, set **all** `first_enhance` values to **3**.
+- If the test step count is anything other than 50, **do not guess** — ask the user how to adjust `first_enhance` before running.
 - `--flow-reverse` — Enable flow matching reverse process
 - `--embedded-cfg-scale` — Embedded classifier-free guidance (default 6.0)
 - `--flow-shift` — Flow shift factor (default 7.0)
