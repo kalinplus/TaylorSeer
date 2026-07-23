@@ -10,10 +10,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 INFER_PY=/mnt/workspace/hkl/miniconda3/envs/infer/bin/python
 
 # GPU 列表:第 d 个任务用 GPU_LIST[d]。Num_Devices 决定并行卡数,需 <= 列表长度
-GPU_LIST=(0 1 2 3 4 5 6 7)
+GPU_LIST=(1 2 3 4 5 6 7)
 
 # Fixed parameters
-Num_Devices="8"
+Num_Devices="7"
 SEED="42"
 Num_Videos_per_Sample="5"
 full_info_path="./eval/"
@@ -41,8 +41,8 @@ chunk_size=$(( (total_prompts + Num_Devices - 1) / Num_Devices ))
 # Configurations: N=FRESH_THRESHOLD, O=MAX_ORDER, F=FIRST_ENHANCE, alpha=SMOOTHING_ALPHA
 # TAYLOR_USE_SMOOTHING is inferred from alpha (0 → False, >0 → True)
 configs=(
-    "original"          # 原版无加速基线 (mode=original, 每步全算), 作为感知指标参考
-    "3  1  3  0.8"
+    # "original"          # 原版无加速基线 (mode=original, 每步全算), 作为感知指标参考
+    # "3  1  3  0.8"
     "5  1  3  0.8"
     "6  1  3  0.8"
 )

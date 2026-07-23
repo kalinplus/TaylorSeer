@@ -3,6 +3,20 @@ import os
 import time
 
 import torch
+
+# Compat: torch>=2.6 默认 torch.load(weights_only=True),会让 VBench 的 RAFT
+# (motion_smoothness) 等模型 UnpicklingError。这里在 import vbench 前把默认改为
+# weights_only=False(本机离线评测、信任 VBench 自带权重)。
+_orig_torch_load = torch.load
+
+
+def _torch_load_compat(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)
+    return _orig_torch_load(*args, **kwargs)
+
+
+torch.load = _torch_load_compat
+
 from vbench import VBench
 
 full_info_path = "eval/vbench/VBench_full_info.json"

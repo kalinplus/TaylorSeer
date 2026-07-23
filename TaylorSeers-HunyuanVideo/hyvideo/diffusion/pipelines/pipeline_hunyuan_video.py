@@ -966,6 +966,23 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             from ...modules.taylor_utils import convert_flops
             total_flops = 0
 
+        # [BENCHMARK] Per-step FLOPs + wall-clock-time of the real transformer forward,
+        # bucketed by step type ('full' vs 'taylor_cache'). Gated by TAYLOR_BENCHMARK.
+        # Independent of the (inert) calflops/test_FLOPs path above.
+        benchmark = os.environ.get("TAYLOR_BENCHMARK", "").lower() in ("1", "true", "yes")
+        benchmark_profiler = None
+        bench_stats = {}  # step-type -> list of per-step stat dicts
+        bench_warmup = 0
+        if benchmark:
+            from ...modules.taylor_utils.benchmark import FlopsTimeProfiler
+
+            benchmark_profiler = FlopsTimeProfiler(self.transformer)
+            benchmark_profiler.attach_attention()
+            bench_warmup = int(cache_dic.get("first_enhance", 3))
+            print(
+                f"[BENCHMARK] attached profiler; warmup(excluded from time avg)={bench_warmup} steps"
+            )
+
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # [MEM-DBG] baseline after text encoding, before denoising
@@ -1030,6 +1047,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         noise_pred = latent_model_input
                 else:
                     # predict the noise residual
+                    if benchmark:
+                        benchmark_profiler.step_begin()
                     with torch.autocast(
                         device_type="cuda", dtype=target_dtype, enabled=autocast_enabled
                     ):
@@ -1048,6 +1067,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         )[
                             "x"
                         ]
+                    if benchmark:
+                        _st = benchmark_profiler.step_end()
+                        _st["step"] = i
+                        _st["type"] = current["type"]
+                        _st["warmup"] = i < bench_warmup
+                        bench_stats.setdefault(_st["type"], []).append(_st)
 
                 # [MEM-DBG] per-step memory after the transformer forward (peak = high-water mark)
                 try:
@@ -1096,6 +1121,59 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
+
+        if benchmark:
+            import json as _json
+
+            benchmark_profiler.detach()
+
+            def _summarize(steps):
+                if not steps:
+                    return {"n": 0, "flops_mean_GFLOPs": 0.0, "ms_mean": 0.0}
+                flops_mean = sum(s["total_flops"] for s in steps) / len(steps) / 1e9
+                timed = [s for s in steps if not s["warmup"]] or steps
+                ms_mean = sum(s["ms"] for s in timed) / len(timed)
+                return {"n": len(steps), "flops_mean_GFLOPs": flops_mean, "ms_mean": ms_mean}
+
+            cached_groups = ["taylor_cache", "ToCa", "aggressive"]
+            full_s = [s for g, lst in bench_stats.items() if g == "full" for s in lst]
+            cached_s = [s for g, lst in bench_stats.items() if g in cached_groups for s in lst]
+            all_s = [s for lst in bench_stats.values() for s in lst]
+            all_timed = [s for s in all_s if not s["warmup"]] or all_s
+            full = _summarize(full_s)
+            cached = _summarize(cached_s)
+            total_flops_all = sum(s["total_flops"] for s in all_s)
+            total_ms_all = sum(s["ms"] for s in all_timed)
+            result = {
+                "tag": os.environ.get("TAYLOR_BENCHMARK_TAG", ""),
+                "infer_steps": len(all_s),
+                "n_full": full["n"],
+                "n_cached": cached["n"],
+                "warmup_steps": bench_warmup,
+                "latent_input_shape": list(latent_model_input.shape),
+                "total_TFLOPs": total_flops_all / 1e12,
+                "avg_GFLOPs_per_step": (total_flops_all / len(all_s) / 1e9) if all_s else 0.0,
+                "full_GFLOPs": full["flops_mean_GFLOPs"],
+                "cached_GFLOPs": cached["flops_mean_GFLOPs"],
+                "total_s": total_ms_all / 1000.0,
+                "avg_ms_per_step": (total_ms_all / len(all_timed)) if all_timed else 0.0,
+                "full_ms": full["ms_mean"],
+                "cached_ms": cached["ms_mean"],
+            }
+            print("==================== TAYLOR BENCHMARK ====================")
+            print(f"  config: {result['tag']}  (n_full={result['n_full']}, n_cached={result['n_cached']}, warmup={result['warmup_steps']})")
+            print(f"  latent_input_shape: {result['latent_input_shape']}")
+            print(f"  FLOPs  : total {result['total_TFLOPs']:.4f} TFLOPs | avg {result['avg_GFLOPs_per_step']:.3f} GFLOPs/step | full {result['full_GFLOPs']:.3f} | cached {result['cached_GFLOPs']:.3f} GFLOPs")
+            print(f"  Time   : total {result['total_s']:.3f} s     | avg {result['avg_ms_per_step']:.2f} ms/step      | full {result['full_ms']:.2f} | cached {result['cached_ms']:.2f} ms")
+            print("==========================================================")
+            out_path = os.environ.get("TAYLOR_BENCHMARK_OUT", "")
+            if out_path:
+                _od = os.path.dirname(out_path)
+                if _od and not os.path.isdir(_od):
+                    os.makedirs(_od, exist_ok=True)
+                with open(out_path, "w") as _f:
+                    _json.dump(result, _f, indent=2)
+                print(f"[BENCHMARK] written -> {out_path}")
 
         # [MEM-FIX] The Taylor feature cache (tens of GiB) is only needed inside the
         # denoising loop above. Drop it before VAE decoding — otherwise VAE decode OOMs

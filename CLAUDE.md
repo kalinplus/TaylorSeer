@@ -64,6 +64,8 @@ cd TaylorSeer-HunyuanVideo && pip install -r requirements.txt
 cd TaylorSeer-Wan2.1 && pip install -r requirements.txt
 ```
 
+Use instaled `de` conda env for generation, and `eval` for evaluation.
+
 **Multi-GPU** uses `torchrun`:
 ```bash
 torchrun --nproc_per_node=8 sample_video.py ...    # HunyuanVideo
